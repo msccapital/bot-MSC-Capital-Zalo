@@ -1,5 +1,0 @@
-vnstock>=3.0
-vnstock_data
-pandas
-requests
-feedparser
