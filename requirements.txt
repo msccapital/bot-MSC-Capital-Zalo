@@ -1,0 +1,4 @@
+vnstock>=4.0
+pandas
+requests
+feedparser
