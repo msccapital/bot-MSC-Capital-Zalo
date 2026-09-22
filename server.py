@@ -51,6 +51,7 @@ def extract_message(payload: dict):
 
 
 @app.route("/webhook", methods=["POST"])
+@app.route("/", methods=["POST"])  # phòng trường hợp Zalo chỉ gọi được domain gốc
 def webhook():
     payload = request.get_json(silent=True) or {}
     print("[webhook] payload nhận được:", payload)  # xem trong Render > Logs
