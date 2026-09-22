@@ -66,15 +66,18 @@ def webhook():
 
     try:
         if not SYMBOL_RE.match(symbol):
-            client.send_message(HELP_TEXT, chat_id=chat_id)
+            result = client.send_message(HELP_TEXT, chat_id=chat_id)
+            print("[webhook] kết quả send_message (help):", result)
         else:
             df = get_analyzed(symbol)
             if len(df) < 30:
-                client.send_message(f"Không đủ dữ liệu cho mã {symbol}.", chat_id=chat_id)
+                result = client.send_message(f"Không đủ dữ liệu cho mã {symbol}.", chat_id=chat_id)
+                print("[webhook] kết quả send_message (thiếu dữ liệu):", result)
             else:
                 chart_path = plot_chart(symbol, df)
                 caption = build_snapshot_caption(symbol, df)
-                client.send_photo(chart_path, caption=caption, chat_id=chat_id)
+                result = client.send_photo(chart_path, caption=caption, chat_id=chat_id)
+                print("[webhook] kết quả send_photo:", result)
     except Exception:
         traceback.print_exc()
         try:
