@@ -22,11 +22,11 @@ import os
 import re
 import traceback
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
 import config
 from utils.zalo_client import ZaloBotClient
-from utils.analysis import get_analyzed, plot_chart, build_snapshot_caption
+from utils.analysis import get_analyzed, plot_chart, build_snapshot_caption, CHART_DIR
 
 app = Flask(__name__)
 client = ZaloBotClient(config.ZALO_BOT_TOKEN, config.ZALO_CHAT_ID)
@@ -75,9 +75,13 @@ def webhook():
                 print("[webhook] kết quả send_message (thiếu dữ liệu):", result)
             else:
                 chart_path = plot_chart(symbol, df)
+                # sendPhoto của Zalo Bot Platform cần 1 URL công khai, không
+                # nhận upload file trực tiếp -- server này tự host file ảnh
+                # vừa vẽ tại route /charts/<file>, rồi gửi đúng URL đó đi.
+                chart_url = request.host_url.rstrip("/") + "/charts/" + os.path.basename(chart_path)
                 caption = build_snapshot_caption(symbol, df)
-                result = client.send_photo(chart_path, caption=caption, chat_id=chat_id)
-                print("[webhook] kết quả send_photo:", result)
+                result = client.send_photo_url(chart_url, caption=caption, chat_id=chat_id)
+                print("[webhook] kết quả send_photo_url:", result)
     except Exception:
         traceback.print_exc()
         try:
@@ -86,6 +90,13 @@ def webhook():
             pass
 
     return jsonify({"ok": True}), 200
+
+
+@app.route("/charts/<path:filename>", methods=["GET"])
+def serve_chart(filename):
+    # Phục vụ file ảnh biểu đồ vừa vẽ để Zalo (hoặc bất kỳ ai có link) tải về
+    # xem -- đây chính là "URL công khai" mà send_photo_url() cần.
+    return send_from_directory(CHART_DIR, filename)
 
 
 @app.route("/", methods=["GET"])
