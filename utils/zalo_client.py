@@ -2,6 +2,8 @@
 Client gọi API Zalo Bot Platform (bot.zaloplatforms.com).
 API có dạng tương tự Telegram Bot API: sendMessage, sendPhoto, getUpdates.
 """
+import os
+
 import requests
 
 BASE_URL_TEMPLATE = "https://bot-api.zapps.me/bot{token}/{method}"
@@ -27,10 +29,14 @@ class ZaloBotClient:
         return resp.json()
 
     def send_photo(self, photo_path: str, caption: str = "", chat_id: str = None) -> dict:
-        data = {"chat_id": chat_id or self.default_chat_id, "caption": caption}
+        # Gửi chat_id/caption qua query string (không phải multipart form field) —
+        # API sendPhoto của Zalo Bot Platform không đọc đúng các trường này khi
+        # trộn chung với multipart file, đã xác nhận qua lỗi thật "chat_id must
+        # not be empty" / "photo must not be empty" khi gửi theo cách cũ.
+        params = {"chat_id": chat_id or self.default_chat_id, "caption": caption}
         with open(photo_path, "rb") as f:
-            files = {"photo": f}
-            resp = requests.post(self._url("sendPhoto"), data=data, files=files, timeout=30)
+            files = {"photo": (os.path.basename(photo_path), f, "image/png")}
+            resp = requests.post(self._url("sendPhoto"), params=params, files=files, timeout=30)
         resp.raise_for_status()
         return resp.json()
 
