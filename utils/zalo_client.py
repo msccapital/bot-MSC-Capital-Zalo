@@ -1,4 +1,4 @@
-\"""
+"""
 Client gọi API Zalo Bot Platform (bot.zaloplatforms.com).
 API có dạng tương tự Telegram Bot API: sendMessage, sendPhoto, getUpdates.
 
