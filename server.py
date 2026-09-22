@@ -22,7 +22,7 @@ import os
 import re
 import traceback
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, Response
 
 import config
 from utils.zalo_client import ZaloBotClient
@@ -94,9 +94,21 @@ def webhook():
 
 @app.route("/charts/<path:filename>", methods=["GET"])
 def serve_chart(filename):
-    # Phục vụ file ảnh biểu đồ vừa vẽ để Zalo (hoặc bất kỳ ai có link) tải về
-    # xem -- đây chính là "URL công khai" mà send_photo_url() cần.
-    return send_from_directory(CHART_DIR, filename)
+    # Đọc file vào bộ nhớ và tự set Content-Length/Content-Type rõ ràng,
+    # KHÔNG dùng send_from_directory mặc định -- đã xác nhận qua log thật
+    # trên Render: file phục vụ theo cách mặc định bị log content-length = 0,
+    # khiến Zalo tải về báo "The photo URL is invalid".
+    safe_name = os.path.basename(filename)  # chặn path traversal
+    file_path = os.path.join(CHART_DIR, safe_name)
+    if not os.path.isfile(file_path):
+        return "not found", 404
+    with open(file_path, "rb") as f:
+        data = f.read()
+    return Response(
+        data,
+        mimetype="image/png",
+        headers={"Content-Length": str(len(data)), "Cache-Control": "no-store"},
+    )
 
 
 @app.route("/", methods=["GET"])
