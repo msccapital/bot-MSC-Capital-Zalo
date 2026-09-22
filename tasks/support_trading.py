@@ -5,12 +5,16 @@ Chạy 2 lần/ngày: 12h00 và 15h00 (giờ VN).
 Logic:
 1. Với mỗi mã trong watchlist, tính WMA20/40/200, RSI14, MACD.
 2. Nếu giá đang giảm và CHẠM (nằm trong TOUCH_TOLERANCE_PCT quanh) một đường WMA
-   -> lưu vào state "đang theo dõi" + gửi thông báo THEO DÕI.
-3. Ở lần chạy kế tiếp (phiên sau), với mã đang trong state:
+   -> lưu vào state "đang theo dõi" + gửi thông báo THEO DÕI kèm biểu đồ.
+3. Ở phiên của NGÀY GIAO DỊCH KẾ TIẾP (không tính 2 lần chạy trong cùng 1 ngày là
+   2 phiên khác nhau — dữ liệu giá theo ngày chưa đổi trong cùng ngày nên so sánh
+   lại sẽ vô nghĩa), với mã đang trong state:
    - Nếu giá bật tăng trở lại trên đường WMA đã chạm -> xác nhận khuyến nghị MUA
      (đối chiếu thêm RSI hướng lên & MACD tích cực để mô tả phần "Kỹ thuật").
    - Nếu giá thủng hẳn xuống dưới đường WMA đó -> khuyến nghị BÁN.
    - Nếu chưa rõ xu hướng -> tiếp tục giữ trong state (không spam thêm tin).
+   Tất cả các thông báo (THEO DÕI/MUA/BÁN) đều gửi kèm 1 ảnh biểu đồ giá + WMA +
+   RSI + MACD của mã đó.
 
 Giá mục tiêu / Stoploss: xác định theo vùng kháng cự - hỗ trợ gần nhất
 (đỉnh/đáy cũ trong lịch sử giá + các đường WMA còn lại đóng vai trò kháng cự/hỗ trợ),
@@ -21,6 +25,9 @@ import os
 import time
 from datetime import datetime
 
+import matplotlib
+matplotlib.use("Agg")  # không cần màn hình hiển thị, chỉ xuất file ảnh
+import matplotlib.pyplot as plt
 import pandas as pd
 
 import config
@@ -32,6 +39,8 @@ try:
     from vnstock.explorer.vci import Quote
 except ImportError:
     Quote = None
+
+CHART_DIR = "data/charts"
 
 
 # ---------- Indicator helpers ----------
@@ -159,6 +168,48 @@ def rsi_trend_text(df: pd.DataFrame) -> str:
     return "hướng lên" if rsi_now > rsi_prev else "hướng xuống"
 
 
+# ---------- Biểu đồ ----------
+
+def plot_chart(symbol: str, df: pd.DataFrame, lookback: int = 90) -> str:
+    """Vẽ biểu đồ giá + WMA20/40/200 + RSI14 + MACD, trả về đường dẫn file ảnh."""
+    sub = df.tail(lookback)
+    os.makedirs(CHART_DIR, exist_ok=True)
+
+    fig, (ax_price, ax_rsi, ax_macd) = plt.subplots(
+        3, 1, figsize=(10, 8), sharex=True,
+        gridspec_kw={"height_ratios": [3, 1, 1]},
+    )
+
+    ax_price.plot(sub["date"], sub["close"], color="black", linewidth=1.2, label="Giá đóng cửa")
+    wma_colors = {20: "#1f77b4", 40: "#ff7f0e", 200: "#d62728"}
+    for p in config.WMA_PERIODS:
+        ax_price.plot(sub["date"], sub[f"wma{p}"], color=wma_colors.get(p), linewidth=1, label=f"WMA{p}")
+    ax_price.set_title(f"{symbol} — Giá & WMA")
+    ax_price.legend(loc="upper left", fontsize=8)
+    ax_price.grid(alpha=0.3)
+
+    ax_rsi.plot(sub["date"], sub["rsi14"], color="purple", linewidth=1)
+    ax_rsi.axhline(70, color="red", linestyle="--", linewidth=0.7)
+    ax_rsi.axhline(30, color="green", linestyle="--", linewidth=0.7)
+    ax_rsi.set_ylabel("RSI14")
+    ax_rsi.grid(alpha=0.3)
+
+    ax_macd.plot(sub["date"], sub["macd"], color="blue", linewidth=1, label="MACD")
+    ax_macd.plot(sub["date"], sub["macd_signal"], color="orange", linewidth=1, label="Signal")
+    ax_macd.bar(sub["date"], sub["macd_hist"], color="gray", alpha=0.5, width=1.5)
+    ax_macd.set_ylabel("MACD")
+    ax_macd.legend(loc="upper left", fontsize=8)
+    ax_macd.grid(alpha=0.3)
+
+    plt.setp(ax_macd.get_xticklabels(), rotation=45, ha="right")
+    fig.tight_layout()
+
+    path = os.path.join(CHART_DIR, f"{symbol}.png")
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return path
+
+
 def build_watch_message(symbol: str, touched_wma: int, row) -> str:
     return (
         f"⚠️ THEO DÕI [{symbol}]\n"
@@ -207,18 +258,27 @@ def scan_symbol(symbol: str, state: dict, client: ZaloBotClient):
         return  # chưa đủ dữ liệu
 
     last_row = df.iloc[-1]
+    last_date = str(last_row["date"].date())
     watching = state.get(symbol)
 
     if watching:
+        if last_date == watching["touch_date"]:
+            # Vẫn là cùng phiên giao dịch đã ghi nhận chạm (chạy 12h/15h cùng
+            # ngày, dữ liệu ngày chưa đổi) — không so sánh, chờ sang ngày kế
+            # tiếp mới có dữ liệu mới để xác nhận MUA/BÁN.
+            return
+
         touched_wma = watching["touched_wma"]
         wma_val_now = last_row[f"wma{touched_wma}"]
+        chart_path = plot_chart(symbol, df)
+
         if last_row["close"] > wma_val_now:
             msg = build_recommendation_message(symbol, "MUA", touched_wma, last_row, df)
-            client.send_message(msg)
+            client.send_photo(chart_path, caption=msg)
             del state[symbol]
         elif last_row["close"] < wma_val_now * 0.98:  # thủng rõ ràng
             msg = build_recommendation_message(symbol, "BÁN", touched_wma, last_row, df)
-            client.send_message(msg)
+            client.send_photo(chart_path, caption=msg)
             del state[symbol]
         # else: chưa rõ ràng, giữ nguyên state, không gửi thêm tin
         return
@@ -229,10 +289,11 @@ def scan_symbol(symbol: str, state: dict, client: ZaloBotClient):
         if touched_wma:
             state[symbol] = {
                 "touched_wma": touched_wma,
-                "touch_date": str(last_row["date"].date()),
+                "touch_date": last_date,
                 "touch_price": float(last_row["close"]),
             }
-            client.send_message(build_watch_message(symbol, touched_wma, last_row))
+            chart_path = plot_chart(symbol, df)
+            client.send_photo(chart_path, caption=build_watch_message(symbol, touched_wma, last_row))
 
 
 def run():
