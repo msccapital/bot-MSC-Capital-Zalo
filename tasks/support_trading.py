@@ -28,6 +28,7 @@ from datetime import datetime
 import matplotlib
 matplotlib.use("Agg")  # không cần màn hình hiển thị, chỉ xuất file ảnh
 import matplotlib.pyplot as plt
+import mplfinance as mpf
 import pandas as pd
 
 import config
@@ -73,7 +74,10 @@ def macd(series: pd.Series, fast=12, slow=26, signal=9):
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    for p in config.WMA_PERIODS:
+    # Hợp cả 2 danh sách: WMA_PERIODS dùng để phát tín hiệu, WMA_CHART_PERIODS
+    # (có thêm WMA60) chỉ để hiển thị trên biểu đồ cho dễ đối chiếu.
+    all_periods = sorted(set(config.WMA_PERIODS) | set(config.WMA_CHART_PERIODS))
+    for p in all_periods:
         df[f"wma{p}"] = wma(df["close"], p)
     df["rsi14"] = rsi(df["close"], config.RSI_PERIOD)
     df["macd"], df["macd_signal"], df["macd_hist"] = macd(
@@ -171,42 +175,48 @@ def rsi_trend_text(df: pd.DataFrame) -> str:
 # ---------- Biểu đồ ----------
 
 def plot_chart(symbol: str, df: pd.DataFrame, lookback: int = 90) -> str:
-    """Vẽ biểu đồ giá + WMA20/40/200 + RSI14 + MACD, trả về đường dẫn file ảnh."""
-    sub = df.tail(lookback)
+    """Vẽ biểu đồ NẾN + khối lượng + WMA20/40/60/200 + RSI14 + MACD,
+    trả về đường dẫn file ảnh."""
+    sub = df.tail(lookback).copy()
+    sub = sub.set_index(pd.DatetimeIndex(sub["date"]))
+    sub = sub.rename(columns={
+        "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume",
+    })
     os.makedirs(CHART_DIR, exist_ok=True)
 
-    fig, (ax_price, ax_rsi, ax_macd) = plt.subplots(
-        3, 1, figsize=(10, 8), sharex=True,
-        gridspec_kw={"height_ratios": [3, 1, 1]},
-    )
+    wma_colors = {20: "#1f77b4", 40: "#ff7f0e", 60: "#2ca02c", 200: "#d62728"}
+    add_plots = []
+    for p in config.WMA_CHART_PERIODS:
+        add_plots.append(mpf.make_addplot(
+            sub[f"wma{p}"], panel=0, color=wma_colors.get(p, "gray"), width=1.0,
+        ))
+    add_plots.append(mpf.make_addplot(
+        sub["rsi14"], panel=2, color="purple", width=1.0, ylabel="RSI14",
+    ))
+    add_plots.append(mpf.make_addplot(
+        sub["macd"], panel=3, color="blue", width=1.0, ylabel="MACD",
+    ))
+    add_plots.append(mpf.make_addplot(
+        sub["macd_signal"], panel=3, color="orange", width=1.0,
+    ))
+    add_plots.append(mpf.make_addplot(
+        sub["macd_hist"], panel=3, type="bar", color="gray", alpha=0.5,
+    ))
 
-    ax_price.plot(sub["date"], sub["close"], color="black", linewidth=1.2, label="Giá đóng cửa")
-    wma_colors = {20: "#1f77b4", 40: "#ff7f0e", 200: "#d62728"}
-    for p in config.WMA_PERIODS:
-        ax_price.plot(sub["date"], sub[f"wma{p}"], color=wma_colors.get(p), linewidth=1, label=f"WMA{p}")
-    ax_price.set_title(f"{symbol} — Giá & WMA")
-    ax_price.legend(loc="upper left", fontsize=8)
-    ax_price.grid(alpha=0.3)
-
-    ax_rsi.plot(sub["date"], sub["rsi14"], color="purple", linewidth=1)
-    ax_rsi.axhline(70, color="red", linestyle="--", linewidth=0.7)
-    ax_rsi.axhline(30, color="green", linestyle="--", linewidth=0.7)
-    ax_rsi.set_ylabel("RSI14")
-    ax_rsi.grid(alpha=0.3)
-
-    ax_macd.plot(sub["date"], sub["macd"], color="blue", linewidth=1, label="MACD")
-    ax_macd.plot(sub["date"], sub["macd_signal"], color="orange", linewidth=1, label="Signal")
-    ax_macd.bar(sub["date"], sub["macd_hist"], color="gray", alpha=0.5, width=1.5)
-    ax_macd.set_ylabel("MACD")
-    ax_macd.legend(loc="upper left", fontsize=8)
-    ax_macd.grid(alpha=0.3)
-
-    plt.setp(ax_macd.get_xticklabels(), rotation=45, ha="right")
-    fig.tight_layout()
+    style = mpf.make_mpf_style(base_mpf_style="yahoo", gridstyle=":", gridcolor="#dddddd")
 
     path = os.path.join(CHART_DIR, f"{symbol}.png")
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
+    mpf.plot(
+        sub,
+        type="candle",
+        style=style,
+        addplot=add_plots,
+        volume=True,
+        panel_ratios=(3, 1, 1, 1),  # giá, volume, RSI, MACD
+        figsize=(10, 9),
+        title=f"\n{symbol} — Giá (nến) & WMA20/40/60/200",
+        savefig=dict(fname=path, dpi=120),
+    )
     return path
 
 
