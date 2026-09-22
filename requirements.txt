@@ -2,5 +2,7 @@ vnstock>=4.0
 pandas
 matplotlib
 mplfinance
+flask
+gunicorn
 requests
 feedparser
