@@ -131,15 +131,21 @@ def scan_symbol(symbol: str, state: dict, client: ZaloBotClient):
 
         touched_wma = watching["touched_wma"]
         wma_val_now = last_row[f"wma{touched_wma}"]
-        chart_path = plot_chart(symbol, df)
+        # TODO: chưa gửi kèm biểu đồ ở đây — nhiệm vụ này chạy qua GitHub
+        # Actions (không có server luôn bật để host ảnh thành URL công khai
+        # như server.py), và sendPhoto của Zalo Bot Platform không nhận
+        # upload file trực tiếp (xem lưu ý trong utils/zalo_client.py). Tạm
+        # gửi text để không bị mất khuyến nghị; sẽ bổ sung cách host ảnh cho
+        # nhánh này sau (vd host qua GitHub raw URL) nếu bạn cần.
+        plot_chart(symbol, df)  # vẫn vẽ để lưu lại, dù chưa gửi được qua Zalo
 
         if last_row["close"] > wma_val_now:
             msg = build_recommendation_message(symbol, "MUA", touched_wma, last_row, df)
-            client.send_photo(chart_path, caption=msg)
+            client.send_message(msg)
             del state[symbol]
         elif last_row["close"] < wma_val_now * 0.98:  # thủng rõ ràng
             msg = build_recommendation_message(symbol, "BÁN", touched_wma, last_row, df)
-            client.send_photo(chart_path, caption=msg)
+            client.send_message(msg)
             del state[symbol]
         # else: chưa rõ ràng, giữ nguyên state, không gửi thêm tin
         return
@@ -153,8 +159,8 @@ def scan_symbol(symbol: str, state: dict, client: ZaloBotClient):
                 "touch_date": last_date,
                 "touch_price": float(last_row["close"]),
             }
-            chart_path = plot_chart(symbol, df)
-            client.send_photo(chart_path, caption=build_watch_message(symbol, touched_wma, last_row))
+            plot_chart(symbol, df)  # vẫn vẽ để lưu lại, dù chưa gửi được qua Zalo
+            client.send_message(build_watch_message(symbol, touched_wma, last_row))
 
 
 def run():
